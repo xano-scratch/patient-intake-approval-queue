@@ -1,141 +1,117 @@
-# patient-intake-approval-queue
+# Patient Intake Approval Queue
 
-A [XanoTS](https://www.npmjs.com/package/@xanots/sdk) project: a Xano
-backend authored in TypeScript under [`xano/`](xano/), and a React + Vite
-frontend under [`frontend/`](frontend/) that derives its request paths and
-types from the backend defs — so the two can't drift.
+A governed backend for a patient intake and clinician review queue. It routes every
+intake through a versioned triage rule set, checks the caller's role at the API layer,
+and records an append-only audit trail of every action.
+
+`6 tables · 11 API endpoints · 3 RBAC roles · append-only audit trail`
+
+![The review console: a priority-ordered queue beside intake #2, showing the triage rule that fired and the append-only audit trail.](docs/screenshot.png)
+
+## What it demonstrates
+
+This is the **Pilot to Production** play (Xano's Play 3) for **healthcare**. The frontend
+could have shipped in an afternoon from an AI app builder. The point of this project is
+everything IT needs before that frontend can touch a real patient: a triage rule set you
+can version and audit, role checks that run on the server, and a record of who did what.
+
+Speed is not the argument here. Control is. The business logic lives in one typed API
+layer a technical evaluator can read and trust:
+
+- **A versioned triage rule set.** The active rule set decides each intake's priority and
+  records the exact version and the reason on the intake. Publishing a new version retires
+  the old one, and older intakes keep pointing at the version that actually routed them.
+- **API-layer RBAC.** An `auth` table plus a per-endpoint role guard (`s.precondition`).
+  A claim, approve, deny, or publish from the wrong role is rejected on the server with a
+  403, not hidden behind a disabled button. Auth is enforced at the API layer, never with
+  row-level security.
+- **An append-only audit trail.** Every state change (submitted, evaluated, claimed,
+  approved, denied) writes one row with the actor and the time. Nothing is updated after
+  insert, so the history of an intake is always reconstructable.
+
+## Repo layout
+
+```
+xano/
+  index.ts             the workspace, registering everything
+  tables/              users, patients, triage_rules, intakes, review_queue, review_actions
+  api/intake.ts        the API group (pinned canonical slug)
+  api/*.ts             the 11 endpoints
+  lib/guards.ts        requireRole: the shared API-layer role guard
+  xano.lock            pinned object identities (committed)
+frontend/
+  src/lib/api.ts       the one contract: paths and types derived from the query defs
+  src/screens/         login, submit, queue, detail, rules
+docs/
+  index.html           the landing page (served by GitHub Pages)
+  screenshot.png       the running app
+```
+
+## API surface
+
+All endpoints live under one API group, `intake`.
+
+| Verb | Path | What it enforces |
+| --- | --- | --- |
+| POST | `/api:intake/auth/login` | Public. Verifies the credential, mints a token, returns the role. |
+| POST | `/api:intake/submit` | Intake clerk. Matches or creates a patient by MRN, opens the intake. |
+| POST | `/api:intake/evaluate` | Intake clerk. Runs the active rules, stamps priority, version, and reason, queues it. |
+| POST | `/api:intake/queue/claim` | Clinician. Claims an open queue item. |
+| POST | `/api:intake/queue/approve` | Clinician. Approves a claimed intake. |
+| POST | `/api:intake/queue/deny` | Clinician. Denies a claimed intake with a reason. |
+| GET | `/api:intake/queue` | Clinician or viewer. The queue, emergent first. |
+| GET | `/api:intake/detail/{intake_id}` | Any signed-in user. The intake, its routing rule, and its audit trail. |
+| POST | `/api:intake/rules/activate` | Clinician. Publishes a new triage rule version. |
+| GET | `/api:intake/rules` | Any signed-in user. Every rule version, active flagged. |
+| GET | `/api:intake/seed` | Public. Seeds the demo (idempotent; `?reset=true` wipes and reseeds). |
 
 ## Quick start
 
-```bash
+Go from clone to a live, governed backend in about a minute.
+
+```sh
+git clone https://github.com/xano-scratch/patient-intake-approval-queue
+cd patient-intake-approval-queue
 npm install
-npm run dev          # run the frontend (no backend needed yet)
+npx xanots login        # authenticate with Xano once
+npm run xano:deploy      # builds the frontend, deploys backend + static together
 ```
 
-Then author your backend in [`xano/index.ts`](xano/index.ts) — start with the
-walkthrough in [`xano/EXAMPLE.md`](xano/EXAMPLE.md).
+The deploy prints the live URLs. Open the frontend and it seeds demo data on first load,
+so the queue, the detail view, and the rule versions all show real records right away.
+Sign in as any seeded user (password `password123`):
 
-## Deploy
+- `clerk@clinic.test` (intake clerk) submits and evaluates intakes.
+- `clinician@clinic.test` (clinician) claims, approves, denies, and publishes rules.
+- `viewer@clinic.test` (viewer) reads the queue and the audit trail.
 
-```bash
-xanots login            # once, to authenticate against your Xano account
-npm run xano:deploy     # build the frontend, then ship it with the backend
-```
+To see the RBAC in action, sign in as the viewer and try to approve an item. The API
+returns a 403, shown inline as blocked by role.
 
-- `npm run xano:export` compiles the backend to `workspace.json` (don't commit it).
-- `npm run xano:deploy` deploys the backend and the built frontend to a live
-  **ephemeral** environment and prints its URL. Run it again to refresh the same
-  environment; if it expired, a fresh one is created and the new URL is called out.
-- `xanots status` says who you are signed in as, which workspace you are bound to, and
-  which environment this project last deployed to — its URL, and when it expires. You
-  never have to remember the environment's name.
-- `npm run xano:test` runs the tests the DEPLOYED environment carries — the `tests`
-  on a query/function/middleware and any `workflowTest()`. It compiles nothing, so
-  deploy first. A failing suite exits 5, distinct from a crash. `xanots deploy
-  ./xano/index.ts --test` does both in one step.
+## How the triage decision works
 
-## `xano.lock` — commit it
+`triage_rules.criteria` is an ordered list of conditions, each shaped
+`{ field, value, priority, reason }`. `evaluate` loads the one active version and walks
+the list. The first match wins: a symptom rule matches a token in the intake's symptom
+list, and a chief-complaint rule matches text in the complaint. The intake records the
+priority, the version, and the reason, so the decision is never a black box.
 
-Object identity derives from `(type, name)`, so a rename would otherwise change
-an object's guid and the engine would **delete and recreate** it rather than
-renaming it in place — losing its rows on a record-preserving import.
-[`xano/xano.lock`](xano/xano.lock) freezes each guid and each API group's
-canonical slug, so renames and re-deploys keep the same identities (and the same
-public URLs).
+## FAQ
 
-Every build writes it — no flag — and it **must be committed**. Ignoring it means
-each build mints identities and public URLs that are thrown away and re-invented
-next time. If you release to a workspace that already exists, adopt what it
-already serves first with `xanots lock import <live-bundle.json> --lock=xano/xano.lock`;
-that is also the recovery path once identities have drifted.
+**Is this row-level security?** No. Every permission check runs at the API layer, in the
+endpoint stack, against the caller's role. That is Xano's auth model.
 
-```bash
-npm run xano:check      # CI: fail if the export would change xano.lock
-```
+**Where is the business logic?** In `xano/`, as typed def objects. The frontend derives
+its request paths and response types from those same defs (`frontend/src/lib/api.ts`), so
+a schema change surfaces as a type error, not a runtime surprise.
 
-To rename an object: rename it in code, run `npm run xano:export` (stderr prints
-the exact fix-up), run `xanots lock rename <kind> <old> <new> --lock=xano/xano.lock`,
-then export again. `lock rename` and `lock import` need that flag here — they take no
-entry file, so they look for the lock in the current directory, while
-`lock prune ./xano/index.ts` derives it from the entry like `export` does.
+**Can I change the triage rules without redeploying?** Yes. Publish a new version from the
+Rule versions screen. The prior version is kept, and past intakes keep the version that
+routed them.
 
-## The one contract
+**Are the demo links permanent?** No. A deployed preview is an ephemeral environment. Run
+`npm run xano:deploy` again for fresh links; the repo is the durable artifact.
 
-[`frontend/src/lib/api.ts`](frontend/src/lib/api.ts) imports the XanoTS query
-defs and derives paths (`getPath()`) and request/response types
-(`InferInput` / `InferResponse`) from them. Never hand-type a URL or a request
-body — change a def and the frontend types follow.
+## License
 
-> To spot-check a def from Node (read `getPath()`/`verb`, log a value), run a real
-> file with `tsx <file.ts>` **from inside the project root** — not `tsx -e`, not
-> bare `node file.ts`, and not from another directory (they mis-resolve the
-> intra-workspace `.js` imports and the `@xanots/sdk` specifier). Or use
-> `xanots routes xano/index.ts` to list every endpoint's verb + path.
-
-## The frontend
-
-React + Vite, styled with [Tailwind CSS](https://tailwindcss.com) v4 and
-[shadcn/ui](https://ui.shadcn.com). shadcn is not a dependency — its components
-are copied into [`frontend/src/components/ui/`](frontend/src/components/ui/) and
-owned by this project, so edit them freely. `Button` and `Card` are already
-there; add more with:
-
-```bash
-npx shadcn@latest add dialog input form
-```
-
-[`components.json`](components.json) is pre-configured, so that works with no
-`shadcn init` step. Icons are [Lucide](https://lucide.dev/icons), installed as `lucide-react` and
-imported by name from the package root —
-`import { ArrowRight } from "lucide-react";`.
-[`frontend/src/App.tsx`](frontend/src/App.tsx) already uses one.
-
-Components import through the `@/` alias
-(`@/components/ui/button`, `@/lib/utils`), which maps to `frontend/src/` in both
-`tsconfig.json` and `vite.config.ts` — change one and change the other.
-
-Colors come from the theme tokens in
-[`frontend/src/index.css`](frontend/src/index.css) — see **Theming** below.
-
-## Theming
-
-Scaffolded with the **Zinc Blue** theme. Every color in the app comes from
-the semantic tokens at the top of
-[`frontend/src/index.css`](frontend/src/index.css) — `--primary`,
-`--muted-foreground`, `--border`, the `--chart-*` ramp, the `--sidebar-*` set —
-and every shadcn component reads those names, so editing one value rebrands
-everything that uses it. Style with the token classes (`bg-primary`,
-`text-muted-foreground`) rather than raw palette classes like `bg-gray-100`, or
-the theme stops being one.
-
-Tailwind v4 has no `tailwind.config.js`; that stylesheet *is* the config.
-
-To swap the whole palette later:
-
-```bash
-npx shadcn@latest add https://ui.shadcn.com/r/themes/stone.json   # or any registry theme
-```
-
-Dark mode follows the OS until the user says otherwise. The pieces:
-an inline script in the HTML entry applies the mode before first paint,
-[`frontend/src/lib/theme.ts`](frontend/src/lib/theme.ts) holds and persists it,
-and the mode toggle on the landing page cycles system → light → dark.
-
-## Add-ons
-
-XanoTS is composable with other `@xanots/*` packages:
-
-- **[`@xanots/auth`](https://www.npmjs.com/package/@xanots/auth)** — turnkey
-  authentication (user/login/signup tables and endpoints). Install it with
-  `xanots marketplace install @xanots/auth`, then register it in
-  `xano/index.ts`. Authentication only — **not** authorization: it has no
-  roles, permissions, or route guards. Build those with `@xanots/sdk` (a role
-  column plus a `s.precondition` per endpoint).
-- More `@xanots/*` packages register onto the same workspace. This list
-  does not update itself — run `xanots marketplace list` for the live
-  catalogue, `xanots marketplace search <words>` to narrow it, and
-  `xanots marketplace details <package>` to see what an add-on installs and
-  how to register it. All three work before you log in.
-
-None of these ship with the scaffold. Install one only when you need it — an
-add-on you never register is weight in `package.json` for nothing.
+MIT.

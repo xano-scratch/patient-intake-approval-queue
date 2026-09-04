@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "objects": {
+    "app:intake": {
+      "guid": "b91d17cfc4c6aab29e2c4b050ebe1253",
+      "canonical": "intake",
+      "canonical_source": "code"
+    },
+    "dbo:intakes": {
+      "guid": "5b5c95dbca51fc2edd889416b665ef85"
+    },
+    "dbo:patients": {
+      "guid": "cd4f6dd5f51dbecce618b5cb8dfe3921"
+    },
+    "dbo:review_actions": {
+      "guid": "249d3f262beac1419df2102dcccfaa84"
+    },
+    "dbo:review_queue": {
+      "guid": "d702fe989a0bf36922de2bc6340fffa2"
+    },
+    "dbo:triage_rules": {
+      "guid": "b50ba6af6f70d990bd26682ca5b15905"
+    },
+    "dbo:users": {
+      "guid": "157d4a98d979cf04b9ccdb98dfc15229"
+    },
+    "query:intake|GET|detail/{intake_id}": {
+      "guid": "2c70a5894a34bbde611d6e26941afdbd"
+    },
+    "query:intake|GET|queue": {
+      "guid": "e26b0243983164f6c8e83fe8ccf93f66"
+    },
+    "query:intake|GET|rules": {
+      "guid": "9e153e3fbdee1020085e7950d6899b9b"
+    },
+    "query:intake|GET|seed": {
+      "guid": "c4f1510ff6a164fec28a4a674b6a9845"
+    },
+    "query:intake|POST|auth/login": {
+      "guid": "5a3dd36ec493f0d2f99c3f28f0404d4b"
+    },
+    "query:intake|POST|evaluate": {
+      "guid": "b4ce8111b0ab8b3c1bad0441ded10a98"
+    },
+    "query:intake|POST|queue/approve": {
+      "guid": "a3e7bb41b8adeadfd8bbc6e78e3c7433"
+    },
+    "query:intake|POST|queue/claim": {
+      "guid": "671e1f940d67bb3877836ec8de66a15b"
+    },
+    "query:intake|POST|queue/deny": {
+      "guid": "dd957f62dc76cca43eab9e02d52ad508"
+    },
+    "query:intake|POST|rules/activate": {
+      "guid": "33d148fb317b483e8dd543ad564fcc31"
+    },
+    "query:intake|POST|submit": {
+      "guid": "5122dbf1f26d7fd45650f8b260103f75"
+    }
+  }
+}

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Patient Intake Approval Queue — a governed Xano backend</title>
+    <meta
+      name="description"
+      content="A governed Xano backend for a patient intake and clinician review queue: a versioned triage rule set, API-layer RBAC, and an append-only audit trail. The Pilot to Production play for healthcare."
+    />
+    <style>
+      :root {
+        --bg: #0a0b0f;
+        --panel: #14161d;
+        --panel-2: #1b1e27;
+        --border: #262a36;
+        --fg: #e8eaf0;
+        --muted: #9aa1b2;
+        --primary: #4f7cff;
+        --primary-fg: #ffffff;
+        --emergent: #e5484d;
+        --urgent: #4f7cff;
+        --routine: #3a3f4b;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+      a { color: var(--primary); text-decoration: none; }
+      code, pre {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      header.hero {
+        padding: 72px 0 40px;
+        border-bottom: 1px solid var(--border);
+        background: radial-gradient(1000px 400px at 50% -10%, rgba(79, 124, 255, 0.14), transparent 70%);
+      }
+      .logo {
+        width: 46px; height: 46px; border-radius: 12px;
+        background: var(--primary); color: var(--primary-fg);
+        display: inline-flex; align-items: center; justify-content: center;
+        margin-bottom: 20px;
+      }
+      .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+      .badge {
+        font-size: 12px; padding: 4px 10px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+      }
+      .badge.play { border-color: rgba(79,124,255,0.5); color: #b9c8ff; background: rgba(79,124,255,0.1); }
+      h1 { font-size: 40px; line-height: 1.1; margin: 0 0 14px; letter-spacing: -0.02em; }
+      .tagline { font-size: 19px; color: var(--muted); max-width: 640px; margin: 0 0 22px; }
+      .meta { font-size: 14px; color: var(--muted); margin-bottom: 26px; font-family: ui-monospace, monospace; }
+      .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+      .btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 11px 20px; border-radius: 10px; font-weight: 600; font-size: 15px;
+        border: 1px solid transparent; cursor: pointer;
+      }
+      .btn.primary { background: var(--primary); color: var(--primary-fg); }
+      .btn.primary:hover { filter: brightness(1.08); }
+      .btn.ghost { background: transparent; border-color: var(--border); color: var(--fg); }
+      .btn.ghost:hover { background: var(--panel); }
+      section { padding: 44px 0; border-bottom: 1px solid var(--border); }
+      h2 { font-size: 24px; margin: 0 0 18px; letter-spacing: -0.01em; }
+      p.lead { color: var(--muted); max-width: 720px; }
+      .shot {
+        margin: 8px 0 0; border: 1px solid var(--border); border-radius: 14px;
+        overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      }
+      .shot img { display: block; width: 100%; height: auto; }
+      .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .card {
+        background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px;
+      }
+      .card h3 { margin: 0 0 6px; font-size: 16px; }
+      .card p { margin: 0; color: var(--muted); font-size: 14px; }
+      table { width: 100%; border-collapse: collapse; font-size: 14px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; }
+      td.verb { font-family: ui-monospace, monospace; color: #b9c8ff; white-space: nowrap; }
+      td.path { font-family: ui-monospace, monospace; white-space: nowrap; }
+      pre {
+        background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+        padding: 16px; overflow-x: auto; font-size: 13.5px; color: #d7dcea;
+      }
+      .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; color:#fff; }
+      .pill.emergent { background: var(--emergent); }
+      .pill.urgent { background: var(--urgent); }
+      .pill.routine { background: var(--routine); color: var(--muted); }
+      .note {
+        background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+        padding: 14px 16px; color: var(--muted); font-size: 14px;
+      }
+      footer { padding: 34px 0 60px; color: var(--muted); font-size: 13px; }
+      ul.tight { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+      ul.tight li { margin: 4px 0; }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="wrap">
+        <div class="logo" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="badges">
+          <span class="badge play">Play 3 · Pilot to Production</span>
+          <span class="badge">Healthcare</span>
+          <span class="badge">API-layer RBAC</span>
+          <span class="badge">Append-only audit</span>
+        </div>
+        <h1>Patient Intake Approval Queue</h1>
+        <p class="tagline">
+          The governed backend under a plausibly AI-built intake tool. A versioned triage
+          rule set, role checks that run on the server, and a full audit trail, so the app
+          is safe to run in production.
+        </p>
+        <p class="meta">6 tables · 11 API endpoints · 3 RBAC roles · append-only audit trail</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="https://github.com/xano-scratch/patient-intake-approval-queue">View on GitHub</a>
+          <a class="btn ghost" href="#use">Use this template</a>
+        </div>
+      </div>
+    </header>
+
+    <section>
+      <div class="wrap">
+        <div class="shot">
+          <img
+            src="screenshot.png"
+            alt="The review console: a priority-ordered queue beside intake #2, showing the triage rule that fired and the append-only audit trail."
+          />
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>What it demonstrates</h2>
+        <p class="lead">
+          The frontend could have shipped in an afternoon from an AI app builder. This
+          project is everything IT needs before that frontend can touch a real patient.
+          Speed is not the argument. Control is: the business logic lives in one typed API
+          layer a technical evaluator can read and trust.
+        </p>
+        <div class="grid" style="margin-top:22px">
+          <div class="card">
+            <h3>Versioned triage rules</h3>
+            <p>The active rule set decides each priority and records the version and reason on the intake. Older intakes keep the version that routed them.</p>
+          </div>
+          <div class="card">
+            <h3>API-layer RBAC</h3>
+            <p>An auth table plus a per-endpoint role guard. Wrong-role writes are rejected on the server with a 403, never with row-level security.</p>
+          </div>
+          <div class="card">
+            <h3>Append-only audit</h3>
+            <p>Submitted, evaluated, claimed, approved, denied. Every change writes one row with the actor and time, and is never updated after.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>API surface</h2>
+        <p class="lead">Every endpoint lives under one API group, <code>intake</code>.</p>
+        <table style="margin-top:16px">
+          <thead>
+            <tr><th>Verb</th><th>Path</th><th>What it enforces</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="verb">POST</td><td class="path">/api:intake/auth/login</td><td>Public. Verifies the credential, mints a token, returns the role.</td></tr>
+            <tr><td class="verb">POST</td><td class="path">/api:intake/submit</td><td>Intake clerk. Matches or creates a patient by MRN, opens the intake.</td></tr>
+            <tr><td class="verb">POST</td><td class="path">/api:intake/evaluate</td><td>Intake clerk. Runs the active rules, stamps priority, version, and reason.</td></tr>
+            <tr><td class="verb">POST</td><td class="path">/api:intake/queue/claim</td><td>Clinician. Claims an open queue item.</td></tr>
+            <tr><td class="verb">POST</td><td class="path">/api:intake/queue/approve</td><td>Clinician. Approves a claimed intake.</td></tr>
+            <tr><td class="verb">POST</td><td class="path">/api:intake/queue/deny</td><td>Clinician. Denies a claimed intake with a reason.</td></tr>
+            <tr><td class="verb">GET</td><td class="path">/api:intake/queue</td><td>Clinician or viewer. The queue, emergent first.</td></tr>
+            <tr><td class="verb">GET</td><td class="path">/api:intake/detail/{intake_id}</td><td>Any signed-in user. The intake, its routing rule, and its audit trail.</td></tr>
+            <tr><td class="verb">POST</td><td class="path">/api:intake/rules/activate</td><td>Clinician. Publishes a new triage rule version.</td></tr>
+            <tr><td class="verb">GET</td><td class="path">/api:intake/rules</td><td>Any signed-in user. Every rule version, active flagged.</td></tr>
+            <tr><td class="verb">GET</td><td class="path">/api:intake/seed</td><td>Public. Seeds the demo data (idempotent).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>The screens</h2>
+        <ul class="tight">
+          <li><strong>Sign in / role switcher.</strong> Pick a seeded user. The role decides what the API allows.</li>
+          <li><strong>Intake.</strong> Submit an intake, then run the rules and watch a
+            <span class="pill emergent">emergent</span>,
+            <span class="pill urgent">urgent</span>, or
+            <span class="pill routine">routine</span> priority get assigned.</li>
+          <li><strong>Review queue.</strong> Emergent first. A clinician claims, approves, or denies; a viewer or clerk is blocked at the API.</li>
+          <li><strong>Intake detail.</strong> The patient, the exact rule version and criteria that fired, and the append-only audit trail.</li>
+          <li><strong>Rule versions.</strong> Every version with the active one flagged, and a clinician-only publish form.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="use">
+      <div class="wrap">
+        <h2>Use this template</h2>
+        <p class="lead">
+          Hand this repo to your coding agent as a starting point, then adapt the tables,
+          endpoints, and screens to your own domain.
+        </p>
+        <pre><code>Clone https://github.com/xano-scratch/patient-intake-approval-queue and use it
+as the starting template for my app. Read its README and xano/ first to learn the
+XanoTS patterns (typed tables, an API group with a pinned canonical slug, per-endpoint
+role guards, an append-only audit trail). Then adapt the tables, endpoints, and screens
+to: &lt;describe your domain and the one governed job it should do&gt;.</code></pre>
+        <p class="lead" style="margin-top:18px">Or run it yourself:</p>
+        <pre><code>git clone https://github.com/xano-scratch/patient-intake-approval-queue
+cd patient-intake-approval-queue
+npm install
+npx xanots login
+npm run xano:deploy</code></pre>
+        <p class="note" style="margin-top:18px">
+          The deploy prints live URLs. A deployed preview is an ephemeral environment, so
+          shared preview links expire. Redeploy any time for fresh links. The repo is the
+          durable artifact.
+        </p>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        Built with <a href="https://www.npmjs.com/package/@xanots/sdk">XanoTS</a>. MIT licensed.
+        Auth is API-layer RBAC, not row-level security. A demo backend, not a production
+        customer reference.
+      </div>
+    </footer>
+  </body>
+</html>
